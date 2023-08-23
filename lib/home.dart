@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:tflite/tflite.dart';
+import 'package:camera/camera.dart';
 
 void main() {
   runApp(const MyApp());
@@ -28,11 +29,30 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  late CameraController _cameraController; // cam controller
   File? _image;
   List? _result;
   bool _imageSelected = false;
   bool _loading=false;
   final _imagePicker=ImagePicker();
+  bool _isCameraOpen = false;
+
+  Future<void> _toggleCamera() async {
+    if (_isCameraOpen) {
+      await _cameraController.stopImageStream();
+    } else {
+      if (_cameraController.value.isInitialized) {
+        await _cameraController.startImageStream(_processCameraFrame);
+      } else {
+        // Initialize the camera controller before starting the stream
+        await _initCamera();
+      }
+    }
+    setState(() {
+      _isCameraOpen = !_isCameraOpen;
+    });
+  }
+
 
   @override
   Future getImage(ImageSource source) async {
@@ -51,6 +71,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Future classifyImage(File? image) async {
     if(image==null){return;}
     var output = await Tflite.runModelOnImage(path: image.path,numResults: 2);
+    print("-----------------------------------------$output");
+
     setState(() {
       _loading=false;
       _result=output;
@@ -60,11 +82,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future loadModel() async {
     await Tflite.loadModel(
-        model:"assets/model_unquant.tflite",
+        model:"assets/best-fp16.tflite",
         labels: "assets/labels.txt"
     );
   }
 
+  @override
   void initState(){
     super.initState();
     _loading=true;
@@ -73,8 +96,35 @@ class _MyHomePageState extends State<MyHomePage> {
         _loading=false;
       });
     });
+    _initCamera();  //camera initialized
   }
 
+
+  Future<void> _initCamera() async{
+    final cameras=await availableCameras();
+    final camera=cameras.first;
+    _cameraController=CameraController(camera, ResolutionPreset.medium);
+    await _cameraController.initialize();
+    _cameraController.startImageStream(_processCameraFrame);
+  }
+
+  void _processCameraFrame(CameraImage image) async {
+    if (_loading) {
+      return;
+    }
+    _loading = true;
+
+    // List? output = await Tflite.runModelOnFrame(
+    //   bytesList: image.planes.map((plane) {
+    //     return plane.bytes;
+    //   }).toList(),
+    // );
+    print("--------------------------------");
+    setState(() {
+      _loading = false;
+      //_result = output;
+    });
+  }
 
 
   @override
@@ -93,9 +143,13 @@ class _MyHomePageState extends State<MyHomePage> {
               height: 250,
               fit: BoxFit.cover,
             )
-                : Container(),
+                : _isCameraOpen
+                  ? CameraPreview(_cameraController)
+                  : Container(),
             CustomButton('Pick from Gallery', () => getImage(ImageSource.gallery)),
-            CustomButton('Open Camera', () => getImage(ImageSource.camera)),
+            CustomButton(
+            _isCameraOpen ? 'Close Camera' : 'Open Camera',() => _toggleCamera()),
+
             if (_result != null)
               Text(
                 'Prediction: ${_result![0]['label']}',
