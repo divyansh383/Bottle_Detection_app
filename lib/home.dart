@@ -1,10 +1,10 @@
 import 'dart:io';
-
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:tflite/tflite.dart';
-import 'package:camera/camera.dart';
-
+import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
+import 'package:image/image.dart' as imglib;
+import 'package:flutter/painting.dart';
 void main() {
   runApp(const MyApp());
 }
@@ -29,30 +29,26 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  late CameraController _cameraController; // cam controller
   File? _image;
   List? _result;
   bool _imageSelected = false;
   bool _loading=false;
   final _imagePicker=ImagePicker();
-  bool _isCameraOpen = false;
+  //---------------------------
+  late tfl.Interpreter _interpreter;
+  late List inputShape;
+  late List outputShape;
+  late tfl.TensorType inputType;
+  late tfl.TensorType outputType;
 
-  Future<void> _toggleCamera() async {
-    if (_isCameraOpen) {
-      await _cameraController.stopImageStream();
-    } else {
-      if (_cameraController.value.isInitialized) {
-        await _cameraController.startImageStream(_processCameraFrame);
-      } else {
-        // Initialize the camera controller before starting the stream
-        await _initCamera();
-      }
-    }
-    setState(() {
-      _isCameraOpen = !_isCameraOpen;
-    });
-  }
-
+  //-image specs---------------------------
+  double x=0;
+  late double y=0;
+  late double h=0;
+  late double w=0;
+  late double cls=0;
+  late double conf=0;
+  //------------------------------------
 
   @override
   Future getImage(ImageSource source) async {
@@ -68,26 +64,90 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     classifyImage(_image);
   }
+
   Future classifyImage(File? image) async {
     if(image==null){return;}
-    var output = await Tflite.runModelOnImage(path: image.path,numResults: 2);
-    print("-----------------------------------------$output");
+    final imageBytes = await image.readAsBytes();
+    var inputTensor = preProcessImage(imageBytes);
+    var outputTensor = List.filled(1 * 10647 * 6, 0.0).reshape([1, 10647, 6]);
+
+    _interpreter.run(inputTensor, outputTensor);
+    List<double> detections = postProcess(outputTensor); // ---(1)
+    print("------output detection best-----------$detections");
 
     setState(() {
+      conf=detections[4];
       _loading=false;
-      _result=output;
-      print(_result);
+      _result=detections;
     });
   }
+  List<double> postProcess(List<dynamic> outputTensor){
+      double maxConfidence =0.0;
+      List<double>? maxConfidenceDetection;
+      for(int i=0;i<outputTensor[0].length;i++){
+        List<double> prediction=outputTensor[0][i];
+          double x = prediction[0];
+          double y = prediction[1];
+          double w = prediction[2];
+          double h = prediction[3];
+          double conf = prediction[4];
 
-  Future loadModel() async {
-    await Tflite.loadModel(
-        model:"assets/best-fp16.tflite",
-        labels: "assets/labels.txt"
-    );
+          if(conf>maxConfidence){
+            maxConfidence=conf;
+            maxConfidenceDetection=[x,y,w,h,conf,prediction[5]];
+          }
+      }
+      return maxConfidenceDetection??[];
   }
 
-  @override
+  List<List<List<List<double>>>> preProcessImage(Uint8List imageBytes) {
+    imglib.Image img = imglib.decodeImage(imageBytes)!;
+    imglib.Image resizedImage = imglib.copyResize(img, width: 416, height: 416);
+
+    List<List<List<List<double>>>> inputValues = List.generate(1, (batchIndex) {
+      List<List<List<double>>> batch = [];
+      for (int row = 0; row < 416; row++) {
+        List<List<double>> rowValues = [];
+        for (int col = 0; col < 416; col++) {
+          List<double> pixelValues = [];
+
+          int pixel = resizedImage.getPixel(col, row);
+          double r = imglib.getRed(pixel)/255.0;
+          double g = imglib.getGreen(pixel)/255.0;
+          double b = imglib.getBlue(pixel)/255.0;
+
+          pixelValues.add(r);
+          pixelValues.add(g);
+          pixelValues.add(b);
+
+          rowValues.add(pixelValues);
+        }
+        batch.add(rowValues);
+      }
+      return batch;
+    });
+
+    return inputValues;
+  }
+
+
+
+
+  // Input shape: [1, 416, 416, 3]
+  // Output shape: [1, 10647, 6]
+  Future<void> loadModel() async {
+    _interpreter = await tfl.Interpreter.fromAsset("assets/best-fp16.tflite");
+    inputShape = _interpreter.getInputTensor(0).shape;
+    outputShape = _interpreter.getOutputTensor(0).shape;
+    print('--------------------------Input shape: $inputShape');
+    print('--------------------------Output shape: $outputShape');
+    inputType = _interpreter.getInputTensor(0).type;
+    outputType = _interpreter.getOutputTensor(0).type;
+    print('--------------------------Input type: $inputType');
+    print('--------------------------Output type: $outputType');
+
+  }
+
   void initState(){
     super.initState();
     _loading=true;
@@ -96,34 +156,6 @@ class _MyHomePageState extends State<MyHomePage> {
         _loading=false;
       });
     });
-    _initCamera();  //camera initialized
-  }
-
-
-  Future<void> _initCamera() async{
-    final cameras=await availableCameras();
-    final camera=cameras.first;
-    _cameraController=CameraController(camera, ResolutionPreset.medium);
-    await _cameraController.initialize();
-    _cameraController.startImageStream(_processCameraFrame);
-  }
-
-  void _processCameraFrame(CameraImage image) async {
-    if (_loading) {
-      return;
-    }
-    _loading = true;
-
-    // List? output = await Tflite.runModelOnFrame(
-    //   bytesList: image.planes.map((plane) {
-    //     return plane.bytes;
-    //   }).toList(),
-    // );
-    print("--------------------------------");
-    setState(() {
-      _loading = false;
-      //_result = output;
-    });
   }
 
 
@@ -131,29 +163,38 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Image Detector'),
+        title: const Text('Bottle Detector'),
       ),
       body: Center(
         child: Column(
           children: [
             _image != null
-                ? Image.file(
-              _image!,
-              width: 250,
-              height: 250,
-              fit: BoxFit.cover,
-            )
-                : _isCameraOpen
-                  ? CameraPreview(_cameraController)
-                  : Container(),
-            CustomButton('Pick from Gallery', () => getImage(ImageSource.gallery)),
-            CustomButton(
-            _isCameraOpen ? 'Close Camera' : 'Open Camera',() => _toggleCamera()),
+                ? Stack(
+              children:[
+                Image.file(
+                  _image!,
+                  width:416,
+                  height: 416,
+                  fit:BoxFit.cover,
+                ),
+                if(_result != null)
+                  Positioned.fill(
+                    child:CustomPaint(
+                      painter: BoundingBoxPainter(
+                        imageSize: const Size(416,416),
+                        detection: _result!,
+                      ),
+                    ),
+                  ),
 
+              ],
+            ): Container(),
+            CustomButton('Pick from Gallery', () => getImage(ImageSource.gallery)),
+            CustomButton('Open Camera', () => getImage(ImageSource.camera)),
             if (_result != null)
               Text(
-                'Prediction: ${_result![0]['label']}',
-                style: TextStyle(fontSize: 20),
+                conf >= 0.5 ? 'Confidence: ${conf * 100}' : 'No Detections',
+                style: const TextStyle(fontSize: 20),
               ),
           ],
         ),
@@ -180,5 +221,58 @@ class CustomButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+//--------------------bounding boxes------------------------
+void drawBoundingBox(Canvas canvas,Size imageSize,List detection) {
+  double x = detection[0];
+  double y = detection[1];
+  double w = detection[2];
+  double h = detection[3];
+  if (detection[4] >= 0.5) {
+    // Scale the coordinates to match the image dimensions
+    double imageWidth = imageSize.width;
+    double imageHeight = imageSize.height;
+
+    x *= imageWidth;
+    y *= imageHeight;
+    w *= imageWidth;
+    h *= imageHeight;
+
+    double left = x - w / 2;
+    double top = y - h / 2;
+    double right = x + w / 2;
+    double bottom = y + h / 2;
+
+    // Create a paint object to define the bounding box style
+    Paint paint = Paint()
+      ..color = Colors.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), paint);
+   }else{
+    print("No detections");
+  }
+  }
+
+
+class BoundingBoxPainter extends CustomPainter{
+  final Size imageSize;
+  final List detection;
+
+  BoundingBoxPainter({
+    required this.imageSize,
+    required this.detection,
+  });
+
+  @override
+  void paint(Canvas canvas,Size size){
+    drawBoundingBox(canvas,imageSize,detection);
+  }
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return false;
   }
 }

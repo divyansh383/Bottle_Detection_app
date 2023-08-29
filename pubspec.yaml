@@ -29,12 +29,15 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
   image_picker: ^1.0.2
-  tflite: ^1.1.2
+  tflite_flutter: ^0.10.1
   flutter:
     sdk: flutter
   camera: ^0.10.5+3
   path_provider: ^2.0.8
   permission_handler: ^8.3.0
+  image: ^3.0.1
+
+
 
 
   # The following adds the Cupertino Icons font to your application.
