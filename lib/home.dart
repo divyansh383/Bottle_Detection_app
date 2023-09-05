@@ -1,10 +1,16 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
 import 'package:image/image.dart' as imglib;
 import 'package:flutter/painting.dart';
+import 'package:camera_app/main.dart';
+import 'package:excel/excel.dart';
+import 'package:path_provider/path_provider.dart';
+
+
 void main() {
   runApp(const MyApp());
 }
@@ -30,7 +36,8 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   File? _image;
-  List? _result;
+  // List? _result;
+  List<List<double>>? _result;
   bool _imageSelected = false;
   bool _loading=false;
   final _imagePicker=ImagePicker();
@@ -48,8 +55,15 @@ class _MyHomePageState extends State<MyHomePage> {
   late double w=0;
   late double cls=0;
   late double conf=0;
-  //------------------------------------
-
+  //--camera----------------------------------
+  CameraImage? cameraImages;
+  CameraController? cameraController;
+  bool _batchPredictionsComplete = false;
+  bool _loadingPredictions=false;
+  //----batch detections---------------------------------------
+  List<File> batch=[];
+  List<List<List<double>>> _batchResults=[];
+  //-------------------------------------
   @override
   Future getImage(ImageSource source) async {
     final image = await ImagePicker().pickImage(source: source);
@@ -65,27 +79,107 @@ class _MyHomePageState extends State<MyHomePage> {
     classifyImage(_image);
   }
 
+  Future<List<File>> selectImageBatch() async {
+    final List<File> selectedImages = [];
+    try{
+       final List<XFile> pickedImages=await ImagePicker().pickMultiImage();
+       if(pickedImages !=null && pickedImages.isNotEmpty){
+         for (var pickedImage in pickedImages) {
+           selectedImages.add(File(pickedImage.path));
+         }
+       }
+       print("files selected");
+    } catch(e){
+      print("Error");
+    }
+    classifyBatch(selectedImages);
+    return selectedImages;
+  }
+  //----for image---------------
   Future classifyImage(File? image) async {
     if(image==null){return;}
     final imageBytes = await image.readAsBytes();
+
     var inputTensor = preProcessImage(imageBytes);
     var outputTensor = List.filled(1 * 10647 * 6, 0.0).reshape([1, 10647, 6]);
 
     _interpreter.run(inputTensor, outputTensor);
-    List<double> detections = postProcess(outputTensor); // ---(1)
-    print("------output detection best-----------$detections");
+    List<List<double>> detections = postProcess(outputTensor);
+    print("------output detection best-----------${detections.length}");
 
     setState(() {
-      conf=detections[4];
+      if(detections.isEmpty){conf=0;}else{conf=detections[0][4];}
       _loading=false;
       _result=detections;
     });
   }
-  List<double> postProcess(List<dynamic> outputTensor){
-      double maxConfidence =0.0;
-      List<double>? maxConfidenceDetection;
+  //-----------for batch images---------------------------------
+  Future classifyBatch(List<File> batchImages) async {
+    _loadingPredictions = true;
+    _batchPredictionsComplete = false;
+
+    List<List<List<double>>> batchDetections=[];
+    for(var imageFile in batchImages){
+      final imageBytes=await imageFile.readAsBytes();
+      var inputTensor=preProcessImage(imageBytes);
+      var outputTensor=List.filled(1 * 10647 * 6, 0.0).reshape([1, 10647, 6]);
+
+      _interpreter.run(inputTensor, outputTensor);
+      List<List<double>> detections = postProcess(outputTensor);
+      batchDetections.add(detections);
+    }
+    //printing
+    for(List<List<double>> pred in batchDetections){
+      print("---------$pred");
+    }
+    setState((){
+      _batchResults=batchDetections;
+      _loadingPredictions = false;
+      _batchPredictionsComplete = true;
+    });
+  }
+
+  //--------for video-----------------------------------------------------------------------
+  void classifyVideo(CameraImage image) async {
+    print("camera open");
+    //preprocessing video-----------------------------
+    List<double> pixels=[];
+    for(var plane in image.planes){
+      pixels.addAll(plane.bytes.map((byte)=>byte.toDouble()));
+    }
+    List<List<List<List<double>>>> inputTensor=[
+      List.generate(416, (row){
+        return List.generate(416,(col){
+          double r=pixels[row*416+col];
+          double g=pixels[416 * 416 + row * 416 + col];
+          double b=pixels[2 * 416 * 416 + row * 416 + col];
+          return [r/255.0,g/255.0,b/255.0];
+        });
+      })
+    ];
+
+    var outputTensor = List.filled(1 * 10647 * 6, 0.0).reshape([1, 10647, 6]);
+    //-----------------------------------------------------
+    _interpreter.run(inputTensor, outputTensor);
+    List<List<double>> detections = postProcess(outputTensor);
+    print("------output detection best video-----------$detections");
+
+    setState(() {
+      if(detections.isNotEmpty){
+         conf=1;
+        _loading=false;
+        _result=detections;
+      }
+    });
+  }
+  //-------------------------------------------------------------------------------------------------
+
+//-------------------------------image processing---------------------------------------------------
+  List<List<double>> postProcess(List<dynamic> outputTensor){
+      double maxConfidence =0.3;
+      List<List<double>> detections=[];
       for(int i=0;i<outputTensor[0].length;i++){
-        List<double> prediction=outputTensor[0][i];
+        List<dynamic> prediction=outputTensor[0][i];
           double x = prediction[0];
           double y = prediction[1];
           double w = prediction[2];
@@ -93,11 +187,13 @@ class _MyHomePageState extends State<MyHomePage> {
           double conf = prediction[4];
 
           if(conf>maxConfidence){
-            maxConfidence=conf;
-            maxConfidenceDetection=[x,y,w,h,conf,prediction[5]];
+              detections.add([x,y,w,h,conf,prediction[5]]);
+          }
+          if(detections.length>=5){
+            break;
           }
       }
-      return maxConfidenceDetection??[];
+      return detections;
   }
 
   List<List<List<List<double>>>> preProcessImage(Uint8List imageBytes) {
@@ -130,11 +226,53 @@ class _MyHomePageState extends State<MyHomePage> {
     return inputValues;
   }
 
+//---------------------------------------------------------------------------------------------------
+Future<void> saveFiles(List<List<List<double>>> batchResults) async {
 
+      final excel = Excel.createExcel();
+      final sheet = excel['BatchResults'];
 
+      sheet.appendRow(['Image','X','Y','Width','Height','Confidence','Class']);
 
+      for(int imgIndex=0;imgIndex<_batchResults.length;imgIndex++){
+        for(var detection in batchResults[imgIndex]){
+          sheet.appendRow([imgIndex+1,...detection]);
+        }
+      }
+
+      final dir=await getApplicationDocumentsDirectory();
+      final filePath='${dir.path}/batch_results.xlsx';
+      final excelBytes = await excel.encode();
+
+      if (excelBytes != null) {
+        final filePath = '${dir.path}/batch_results.xlsx';
+        File(filePath).writeAsBytesSync(excelBytes);
+        print('Batch results saved to $filePath');
+      } else {
+        print('Error: Excel encoding failed.');
+      }
+
+}
+//-------------------------------------------------------------
   // Input shape: [1, 416, 416, 3]
   // Output shape: [1, 10647, 6]
+
+  loadCamera(){
+    cameraController=CameraController(cameras![0],ResolutionPreset.medium);
+    cameraController!.initialize().then((value){
+      if(!mounted){
+        return;
+      }else{
+        setState(() {
+          cameraController!.startImageStream((imageStream) {
+            cameraImages=imageStream;
+            //classifyVideo(imageStream);
+          });
+        });
+      }
+    });
+  }
+
   Future<void> loadModel() async {
     _interpreter = await tfl.Interpreter.fromAsset("assets/best-fp16.tflite");
     inputShape = _interpreter.getInputTensor(0).shape;
@@ -168,7 +306,17 @@ class _MyHomePageState extends State<MyHomePage> {
       body: Center(
         child: Column(
           children: [
-            _image != null
+            (_loadingPredictions)?
+              const CircularProgressIndicator()
+            :(_batchResults.isNotEmpty && _image==null) ?
+
+                  ElevatedButton(
+                    onPressed: () {
+                      saveFiles(_batchResults);
+                    },
+                    child: const Text('Download Results')
+              )
+                : _image != null
                 ? Stack(
               children:[
                 Image.file(
@@ -186,14 +334,37 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                     ),
                   ),
-
               ],
-            ): Container(),
+            ): (cameraController != null && cameraController!.value.isInitialized)?
+                SizedBox(
+                    child:CameraPreview(cameraController!),
+                ): SizedBox(
+                    width: 416,
+                    height: 416,
+                    child: Container(),
+                  ),
             CustomButton('Pick from Gallery', () => getImage(ImageSource.gallery)),
-            CustomButton('Open Camera', () => getImage(ImageSource.camera)),
-            if (_result != null)
+            CustomButton('Open Camera', () {
+              if(_image!=null){
+                setState(() {
+                   _batchResults.clear();
+                  _image=null;
+                  _result=null;
+                });
+              }
+              loadCamera();
+            }),
+            CustomButton('Select Batch', () async {  // for batch selection
+              batch=await selectImageBatch();
+              if(batch.isNotEmpty){
+                _image=null;
+                print("---------------------Selected images in batch: ${batch.length}");
+                print(batch);
+              }
+            }),
+            if(_result != null)
               Text(
-                conf >= 0.5 ? 'Confidence: ${conf * 100}' : 'No Detections',
+                conf >= 0.3 ? 'Detected' :'No Detections',
                 style: const TextStyle(fontSize: 20),
               ),
           ],
@@ -225,42 +396,67 @@ class CustomButton extends StatelessWidget {
 }
 
 //--------------------bounding boxes------------------------
-void drawBoundingBox(Canvas canvas,Size imageSize,List detection) {
-  double x = detection[0];
-  double y = detection[1];
-  double w = detection[2];
-  double h = detection[3];
-  if (detection[4] >= 0.5) {
-    // Scale the coordinates to match the image dimensions
-    double imageWidth = imageSize.width;
-    double imageHeight = imageSize.height;
+void drawBoundingBox(Canvas canvas, Size imageSize, List<List<double>> detections) {
+  for (var detection in detections) {
+    double x = detection[0];
+    double y = detection[1];
+    double w = detection[2];
+    double h = detection[3];
+    double confidence = detection[4];
 
-    x *= imageWidth;
-    y *= imageHeight;
-    w *= imageWidth;
-    h *= imageHeight;
+    if (confidence >= 0.3) {
+      // Scale the coordinates to match the image dimensions
+      double imageWidth = imageSize.width;
+      double imageHeight = imageSize.height;
 
-    double left = x - w / 2;
-    double top = y - h / 2;
-    double right = x + w / 2;
-    double bottom = y + h / 2;
+      x *= imageWidth;
+      y *= imageHeight;
+      w *= imageWidth;
+      h *= imageHeight;
 
-    // Create a paint object to define the bounding box style
-    Paint paint = Paint()
-      ..color = Colors.green
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
+      double left = x - w / 2;
+      double top = y - h / 2;
+      double right = x + w / 2;
+      double bottom = y + h / 2;
 
-    canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), paint);
-   }else{
-    print("No detections");
+      // Create a paint object to define the bounding box style
+      Paint paint = Paint()
+        ..color = Colors.green
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0;
+
+      canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), paint);
+
+      //text
+      TextStyle textStyle =const TextStyle(
+        color: Colors.white,
+        fontSize: 16.0,
+        fontWeight: FontWeight.bold,
+        backgroundColor: Colors.green,
+      );
+      TextSpan textSpan = TextSpan(
+        text: '${(confidence * 100).toStringAsFixed(2)}%',
+        style: textStyle,
+      );
+      TextPainter textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      double textX = left;
+      double textY = top - 20.0;
+
+      textPainter.paint(canvas, Offset(textX, textY));
+    } else {
+      print("No detections");
+    }
   }
-  }
+}
 
 
 class BoundingBoxPainter extends CustomPainter{
   final Size imageSize;
-  final List detection;
+  final List<List<double>> detection;
 
   BoundingBoxPainter({
     required this.imageSize,
