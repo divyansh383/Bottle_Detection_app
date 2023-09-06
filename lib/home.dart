@@ -241,17 +241,17 @@ Future<void> saveFiles(List<List<List<double>>> batchResults) async {
       }
 
       final dir=await getApplicationDocumentsDirectory();
-      final filePath='${dir.path}/batch_results.xlsx';
+      //final desktopDir = Directory('${Platform.environment['USERPROFILE']}\\Desktop');
+      final filePath = '${dir.path}/batch_results.xlsx';
       final excelBytes = await excel.encode();
 
       if (excelBytes != null) {
-        final filePath = '${dir.path}/batch_results.xlsx';
-        File(filePath).writeAsBytesSync(excelBytes);
+        final file = File(filePath);
+        await file.writeAsBytes(excelBytes);
         print('Batch results saved to $filePath');
       } else {
         print('Error: Excel encoding failed.');
       }
-
 }
 //-------------------------------------------------------------
   // Input shape: [1, 416, 416, 3]
