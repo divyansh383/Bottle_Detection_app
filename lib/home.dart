@@ -3,12 +3,13 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:syncfusion_flutter_xlsio/xlsio.dart' show  Workbook, Worksheet;
 import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
 import 'package:image/image.dart' as imglib;
 import 'package:flutter/painting.dart';
 import 'package:camera_app/main.dart';
-import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 
 void main() {
@@ -227,31 +228,78 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
 //---------------------------------------------------------------------------------------------------
+  bool saving=false;
 Future<void> saveFiles(List<List<List<double>>> batchResults) async {
+  setState(() {
+    saving=true;
+  });
+  try{
+    print("saving...");
+    final Workbook workbook=Workbook();
+    final Worksheet sheet=workbook.worksheets[0];
 
-      final excel = Excel.createExcel();
-      final sheet = excel['BatchResults'];
+    sheet.getRangeByName('A1').setText('Image');
+    sheet.getRangeByName('B1').setText('X');
+    sheet.getRangeByName('C1').setText('Y');
+    sheet.getRangeByName('D1').setText('Width');
+    sheet.getRangeByName('E1').setText('Height');
+    sheet.getRangeByName('F1').setText('Confidence');
+    sheet.getRangeByName('G1').setText('Class');
 
-      sheet.appendRow(['Image','X','Y','Width','Height','Confidence','Class']);
+    int rowIndex = 2;
 
-      for(int imgIndex=0;imgIndex<_batchResults.length;imgIndex++){
-        for(var detection in batchResults[imgIndex]){
-          sheet.appendRow([imgIndex+1,...detection]);
+    for(int i=0;i<_batchResults.length;i++){
+      final List<List<double>> detections=batchResults[i];
+      final File imageFile = batch[i];
+      final String imageName = imageFile.uri.pathSegments.last;
+      for(final detection in detections){
+        sheet.getRangeByIndex(rowIndex, 1).setText(imageName);
+        sheet.getRangeByIndex(rowIndex,2).setValue((detection[0]));
+        sheet.getRangeByIndex(rowIndex, 3).setValue(detection[1]);
+        sheet.getRangeByIndex(rowIndex, 4).setValue(detection[2]);
+        sheet.getRangeByIndex(rowIndex, 5).setValue(detection[3]);
+        sheet.getRangeByIndex(rowIndex, 6).setValue(detection[4]*100);
+        sheet.getRangeByIndex(rowIndex, 7).setValue(detection[5]);
+        rowIndex++;
+      }
+    }
+    //----------------saving----------------
+    Directory? dir;
+    try{
+      if(Platform.isAndroid){
+        if(await _requestPermission(Permission.storage)){
+            dir=await getExternalStorageDirectory();
+            final String timestamp = DateTime.now().toString(); // Generate timestamp
+            final String fileName = 'batch_detections_$timestamp.xlsx'; // Append timestamp to file name
+            final String filePath = '${dir!.path}/$fileName';
+            final List<int> bytes = workbook.saveAsStream();
+            final File file=File(filePath);
+            await file.writeAsBytes(bytes);
+            print('Excel file saved to: $filePath');
         }
       }
+    } catch (e){
+        print(e);
+    }
+  } catch(e){
+    print('Error saving Excel file $e');
+  }
+  setState(() {
+    saving=false;
+  });
+}
 
-      final dir=await getApplicationDocumentsDirectory();
-      //final desktopDir = Directory('${Platform.environment['USERPROFILE']}\\Desktop');
-      final filePath = '${dir.path}/batch_results.xlsx';
-      final excelBytes = await excel.encode();
-
-      if (excelBytes != null) {
-        final file = File(filePath);
-        await file.writeAsBytes(excelBytes);
-        print('Batch results saved to $filePath');
-      } else {
-        print('Error: Excel encoding failed.');
-      }
+Future<bool> _requestPermission(Permission permission) async {
+  if(await permission.isGranted){
+    return true;
+  }else{
+    var res=await permission.request();
+    if(res==PermissionStatus.granted){
+      return true;
+    }else{
+      false;
+    }
+  }return false;
 }
 //-------------------------------------------------------------
   // Input shape: [1, 416, 416, 3]
@@ -289,6 +337,7 @@ Future<void> saveFiles(List<List<List<double>>> batchResults) async {
   void initState(){
     super.initState();
     _loading=true;
+    // UserSheetsApi.init();
     loadModel().then((value){
       setState(() {
         _loading=false;
@@ -309,13 +358,20 @@ Future<void> saveFiles(List<List<List<double>>> batchResults) async {
             (_loadingPredictions)?
               const CircularProgressIndicator()
             :(_batchResults.isNotEmpty && _image==null) ?
-
-                  ElevatedButton(
-                    onPressed: () {
-                      saveFiles(_batchResults);
-                    },
-                    child: const Text('Download Results')
-              )
+                Container(
+                  width: 416,
+                  height: 416,
+                  child: Center(
+                    child: ElevatedButton(
+                      onPressed: () {
+                          saveFiles(_batchResults);
+                      },
+                      child: saving
+                          ? const CircularProgressIndicator()
+                          : const Text('Download Results'),
+                    ),
+                  ),
+                )
                 : _image != null
                 ? Stack(
               children:[

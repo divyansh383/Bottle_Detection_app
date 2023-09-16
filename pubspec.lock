@@ -121,22 +121,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.5"
-  equatable:
-    dependency: transitive
-    description:
-      name: equatable
-      sha256: c2b87cb7756efdf69892005af546c56c0b5037f54d2a88269b4f347a505e3ca2
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.5"
-  excel:
+  dio:
     dependency: "direct main"
     description:
-      name: excel
-      sha256: f6a76fff6ac14f48fd44a6528e72705965e02cbc593e00427ab1d9a9f5d3bffa
+      name: dio
+      sha256: ce75a1b40947fea0a0e16ce73337122a86762e38b982e1ccb909daa3b9bc4197
       url: "https://pub.dev"
     source: hosted
-    version: "2.1.0"
+    version: "5.3.2"
   fake_async:
     dependency: transitive
     description:
@@ -304,6 +296,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.1"
+  intl:
+    dependency: transitive
+    description:
+      name: intl
+      sha256: "3bc132a9dbce73a7e4a21a17d06e1878839ffbf975568bc875c60537824b0c4d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.18.1"
+  jiffy:
+    dependency: transitive
+    description:
+      name: jiffy
+      sha256: cc1d4b75016a9156c29b5d61f0c9176c3e0fb0580cc5a0e0422b5d2cab3fbfff
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.2.1"
   js:
     dependency: transitive
     description:
@@ -509,6 +517,30 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.2.0"
+  syncfusion_flutter_core:
+    dependency: transitive
+    description:
+      name: syncfusion_flutter_core
+      sha256: "9f0a4593f7642b2f106e329734d0e5fc746baf8d0a59495eec586cd0d9ba7d02"
+      url: "https://pub.dev"
+    source: hosted
+    version: "22.2.12"
+  syncfusion_flutter_xlsio:
+    dependency: "direct main"
+    description:
+      name: syncfusion_flutter_xlsio
+      sha256: "66b009fce91e10cfa5d9b3cdf2c4aa3fdf7430dab159626f4c67297638da2caf"
+      url: "https://pub.dev"
+    source: hosted
+    version: "22.2.12"
+  syncfusion_officecore:
+    dependency: transitive
+    description:
+      name: syncfusion_officecore
+      sha256: "66d0a0faba40f043bba4ef102474213d3145ffeca2b3f2351a98c0cc10079c27"
+      url: "https://pub.dev"
+    source: hosted
+    version: "22.2.12"
   term_glyph:
     dependency: transitive
     description:
