@@ -119,6 +119,10 @@ class _MyHomePageState extends State<MyHomePage> {
     _loadingPredictions = true;
     _batchPredictionsComplete = false;
 
+    setState(() {
+      processing=true;
+    });
+
     List<List<List<double>>> batchDetections=[];
     for(var imageFile in batchImages){
       final imageBytes=await imageFile.readAsBytes();
@@ -137,6 +141,8 @@ class _MyHomePageState extends State<MyHomePage> {
       _batchResults=batchDetections;
       _loadingPredictions = false;
       _batchPredictionsComplete = true;
+      processing=false;
+
     });
   }
 
@@ -229,6 +235,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
 //---------------------------------------------------------------------------------------------------
   bool saving=false;
+  bool processing=false;
 Future<void> saveFiles(List<List<List<double>>> batchResults) async {
   setState(() {
     saving=true;
@@ -322,7 +329,7 @@ Future<bool> _requestPermission(Permission permission) async {
   }
 
   Future<void> loadModel() async {
-    _interpreter = await tfl.Interpreter.fromAsset("assets/best-fp16.tflite");
+    _interpreter = await tfl.Interpreter.fromAsset("assets/wce_model.tflite");
     inputShape = _interpreter.getInputTensor(0).shape;
     outputShape = _interpreter.getOutputTensor(0).shape;
     print('--------------------------Input shape: $inputShape');
@@ -410,14 +417,28 @@ Future<bool> _requestPermission(Permission permission) async {
               }
               loadCamera();
             }),
-            CustomButton('Select Batch', () async {  // for batch selection
-              batch=await selectImageBatch();
-              if(batch.isNotEmpty){
-                _image=null;
-                print("---------------------Selected images in batch: ${batch.length}");
-                print(batch);
-              }
-            }),
+            Container(
+              width: 280, // Set the desired width here
+              child: ElevatedButton(
+                onPressed: processing
+                    ? null // Disable button while processing
+                    : () async {
+                  if (!processing) {
+                    batch = await selectImageBatch();
+                    if (batch.isNotEmpty) {
+                      _image = null;
+                      print("---------------------Selected images in batch: ${batch.length}");
+                      print(batch);
+                    }
+                  }
+                },
+                child: processing
+                    ? CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                )
+                    : Text("Select Batch"),
+              ),
+            ),
             if(_result != null)
               Text(
                 conf >= 0.3 ? 'Detected' :'No Detections',
