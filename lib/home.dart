@@ -102,7 +102,7 @@ class _MyHomePageState extends State<MyHomePage> {
     final imageBytes = await image.readAsBytes();
 
     var inputTensor = preProcessImage(imageBytes);
-    var outputTensor = List.filled(1 * 10647 * 6, 0.0).reshape([1, 10647, 6]);
+    var outputTensor = List.filled(1 * 3087 * 6, 0.0).reshape([1, 3087, 6]);
 
     _interpreter.run(inputTensor, outputTensor);
     List<List<double>> detections = postProcess(outputTensor);
@@ -127,7 +127,7 @@ class _MyHomePageState extends State<MyHomePage> {
     for(var imageFile in batchImages){
       final imageBytes=await imageFile.readAsBytes();
       var inputTensor=preProcessImage(imageBytes);
-      var outputTensor=List.filled(1 * 10647 * 6, 0.0).reshape([1, 10647, 6]);
+      var outputTensor=List.filled(1 * 3087 * 6, 0.0).reshape([1, 3087, 6]);
 
       _interpreter.run(inputTensor, outputTensor);
       List<List<double>> detections = postProcess(outputTensor);
@@ -155,21 +155,21 @@ class _MyHomePageState extends State<MyHomePage> {
       pixels.addAll(plane.bytes.map((byte)=>byte.toDouble()));
     }
     List<List<List<List<double>>>> inputTensor=[
-      List.generate(416, (row){
-        return List.generate(416,(col){
-          double r=pixels[row*416+col];
-          double g=pixels[416 * 416 + row * 416 + col];
-          double b=pixels[2 * 416 * 416 + row * 416 + col];
+      List.generate(224, (row){
+        return List.generate(224,(col){
+          double r=pixels[row*224+col];
+          double g=pixels[224 * 224 + row * 224 + col];
+          double b=pixels[2 * 224 * 224 + row * 224 + col];
           return [r/255.0,g/255.0,b/255.0];
         });
       })
     ];
 
-    var outputTensor = List.filled(1 * 10647 * 6, 0.0).reshape([1, 10647, 6]);
+    var outputTensor = List.filled(1 * 3087 * 6, 0.0).reshape([1, 3087, 6]);
     //-----------------------------------------------------
     _interpreter.run(inputTensor, outputTensor);
     List<List<double>> detections = postProcess(outputTensor);
-    print("------output detection best video-----------$detections");
+    //print("------output detection best video-----------$detections");
 
     setState(() {
       if(detections.isNotEmpty){
@@ -205,13 +205,13 @@ class _MyHomePageState extends State<MyHomePage> {
 
   List<List<List<List<double>>>> preProcessImage(Uint8List imageBytes) {
     imglib.Image img = imglib.decodeImage(imageBytes)!;
-    imglib.Image resizedImage = imglib.copyResize(img, width: 416, height: 416);
+    imglib.Image resizedImage = imglib.copyResize(img, width: 224, height: 224);
 
     List<List<List<List<double>>>> inputValues = List.generate(1, (batchIndex) {
       List<List<List<double>>> batch = [];
-      for (int row = 0; row < 416; row++) {
+      for (int row = 0; row < 224; row++) {
         List<List<double>> rowValues = [];
-        for (int col = 0; col < 416; col++) {
+        for (int col = 0; col < 224; col++) {
           List<double> pixelValues = [];
 
           int pixel = resizedImage.getPixel(col, row);
@@ -309,7 +309,7 @@ Future<bool> _requestPermission(Permission permission) async {
   }return false;
 }
 //-------------------------------------------------------------
-  // Input shape: [1, 416, 416, 3]
+  // Input shape: [1, 224, 224, 3]
   // Output shape: [1, 10647, 6]
 
   loadCamera(){
@@ -357,17 +357,26 @@ Future<bool> _requestPermission(Permission permission) async {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bottle Detector'),
+        title: const Text('Bleeding Detector'),
       ),
       body: Center(
         child: Column(
           children: [
             (_loadingPredictions)?
-              const CircularProgressIndicator()
+              const SizedBox(
+                width: 224,
+                height: 224,
+                child: Center(
+                  child: SizedBox(
+                    width: 50,
+                    height: 50,
+                    child: CircularProgressIndicator(),
+                  )
+              ))
             :(_batchResults.isNotEmpty && _image==null) ?
                 Container(
-                  width: 416,
-                  height: 416,
+                  width: 224,
+                  height: 224,
                   child: Center(
                     child: ElevatedButton(
                       onPressed: () {
@@ -384,15 +393,15 @@ Future<bool> _requestPermission(Permission permission) async {
               children:[
                 Image.file(
                   _image!,
-                  width:416,
-                  height: 416,
+                  width:224,
+                  height: 224,
                   fit:BoxFit.cover,
                 ),
                 if(_result != null)
                   Positioned.fill(
                     child:CustomPaint(
                       painter: BoundingBoxPainter(
-                        imageSize: const Size(416,416),
+                        imageSize: const Size(224,224),
                         detection: _result!,
                       ),
                     ),
@@ -402,8 +411,8 @@ Future<bool> _requestPermission(Permission permission) async {
                 SizedBox(
                     child:CameraPreview(cameraController!),
                 ): SizedBox(
-                    width: 416,
-                    height: 416,
+                    width: 224,
+                    height: 224,
                     child: Container(),
                   ),
             CustomButton('Pick from Gallery', () => getImage(ImageSource.gallery)),
@@ -428,7 +437,7 @@ Future<bool> _requestPermission(Permission permission) async {
                     if (batch.isNotEmpty) {
                       _image = null;
                       print("---------------------Selected images in batch: ${batch.length}");
-                      print(batch);
+                      // print(batch);
                     }
                   }
                 },
