@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -67,6 +68,7 @@ class _MyHomePageState extends State<MyHomePage> {
   List<File> batch=[];
   List<List<List<double>>> _batchResults=[];
   //-------------------------------------
+  //--------------------------image selection----------------------------
   @override
   Future getImage(ImageSource source) async {
     final image = await ImagePicker().pickImage(source: source);
@@ -98,6 +100,7 @@ class _MyHomePageState extends State<MyHomePage> {
     classifyBatch(selectedImages);
     return selectedImages;
   }
+  //-----------------------ML-------------------------------------------------
   //----for image---------------
 
   Future classifyImage(File? image) async {
@@ -196,10 +199,11 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
   //-------------------------------------------------------------------------------------------------
-
+//--------------------------------data processing-----------------------------------------------------------------
 //-------------------------------image processing---------------------------------------------------
   List<List<double>> postProcess(List<dynamic> outputTensor){
-    double maxConfidence =0.3;
+    double maxConfidence =0.3;//threshhold
+
     List<List<double>> detections=[];
     for(int i=0;i<outputTensor[0].length;i++){
       List<dynamic> prediction=outputTensor[0][i];
@@ -212,12 +216,40 @@ class _MyHomePageState extends State<MyHomePage> {
       if(conf>maxConfidence){
         detections.add([x,y,w,h,conf,prediction[5]]);
       }
-      if(detections.length>=5){
-        break;
+    }
+
+    List<List<double>> selections=[];
+    for(int i=0;i<detections.length;i++){
+      for(int j=i+1;j<detections.length;j++){
+        if(iou(detections[i],detections[j])<0.5){
+          selections.add(detections[i]);
+        }
       }
     }
-    return detections;
+    return selections;
   }
+
+  double iou(List<double> a,List<double> b){
+    double x1 = a[0];
+    double y1 = a[1];
+    double w1 = a[2];
+    double h1 = a[3];
+
+    double x2 = b[0];
+    double y2 = b[1];
+    double w2 = b[2];
+    double h2 = b[3];
+
+    double x1_inter=max(x1,x2);
+    double y1_inter=max(y1,y2);
+    double x2_inter=min(x1+w1,x2+w2);
+    double y2_inter=min(y1+h1,y2+h2);
+
+    double intersection_area=max(0,x2_inter-x1_inter)*max(0,y2_inter-y1_inter);
+    double union_area=w1*h1+w2*h2;
+
+    return intersection_area/(union_area-intersection_area);
+}
 
   List<List<List<List<double>>>> preProcessImage(Uint8List imageBytes) {
     imglib.Image img = imglib.decodeImage(imageBytes)!;
