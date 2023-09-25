@@ -41,9 +41,11 @@ class _MyHomePageState extends State<MyHomePage> {
   List<List<double>>? _result;
   bool _imageSelected = false;
   bool _loading=false;
+  bool _isDetected=false;
   final _imagePicker=ImagePicker();
   //---------------------------
   late tfl.Interpreter _interpreter;
+  late tfl.Interpreter _classifier;
   late List inputShape;
   late List outputShape;
   late tfl.TensorType inputType;
@@ -83,13 +85,13 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<List<File>> selectImageBatch() async {
     final List<File> selectedImages = [];
     try{
-       final List<XFile> pickedImages=await ImagePicker().pickMultiImage();
-       if(pickedImages !=null && pickedImages.isNotEmpty){
-         for (var pickedImage in pickedImages) {
-           selectedImages.add(File(pickedImage.path));
-         }
-       }
-       print("files selected");
+      final List<XFile> pickedImages=await ImagePicker().pickMultiImage();
+      if(pickedImages !=null && pickedImages.isNotEmpty){
+        for (var pickedImage in pickedImages) {
+          selectedImages.add(File(pickedImage.path));
+        }
+      }
+      print("files selected");
     } catch(e){
       print("Error");
     }
@@ -97,22 +99,36 @@ class _MyHomePageState extends State<MyHomePage> {
     return selectedImages;
   }
   //----for image---------------
+
   Future classifyImage(File? image) async {
     if(image==null){return;}
     final imageBytes = await image.readAsBytes();
 
     var inputTensor = preProcessImage(imageBytes);
-    var outputTensor = List.filled(1 * 3087 * 6, 0.0).reshape([1, 3087, 6]);
+    var outputTensor_c = List.filled(1 * 1, 0.0).reshape([1, 1]);
+    _classifier.run(inputTensor,outputTensor_c);
+    print("bleeding probability : ${outputTensor_c[0][0]}");
+    if(outputTensor_c[0][0]>0.5){
+      var outputTensor = List.filled(1 * 3087 * 6, 0.0).reshape([1, 3087, 6]);
 
-    _interpreter.run(inputTensor, outputTensor);
-    List<List<double>> detections = postProcess(outputTensor);
-    print("------output detection best-----------${detections.length}");
+      _interpreter.run(inputTensor, outputTensor);
+      List<List<double>> detections = postProcess(outputTensor);
+      print("------output detection best-----------${detections.length}");
+      setState(() {
+        if(detections.isEmpty){conf=0;}else{conf=detections[0][4];}
+        _loading=false;
+        _isDetected=true;
+        _result=detections;
+      });
+    }else{
+      setState(() {
+        _result=[];
+        _isDetected=false;
+      });
+    }
 
-    setState(() {
-      if(detections.isEmpty){conf=0;}else{conf=detections[0][4];}
-      _loading=false;
-      _result=detections;
-    });
+
+
   }
   //-----------for batch images---------------------------------
   Future classifyBatch(List<File> batchImages) async {
@@ -173,7 +189,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     setState(() {
       if(detections.isNotEmpty){
-         conf=1;
+        conf=1;
         _loading=false;
         _result=detections;
       }
@@ -183,24 +199,24 @@ class _MyHomePageState extends State<MyHomePage> {
 
 //-------------------------------image processing---------------------------------------------------
   List<List<double>> postProcess(List<dynamic> outputTensor){
-      double maxConfidence =0.3;
-      List<List<double>> detections=[];
-      for(int i=0;i<outputTensor[0].length;i++){
-        List<dynamic> prediction=outputTensor[0][i];
-          double x = prediction[0];
-          double y = prediction[1];
-          double w = prediction[2];
-          double h = prediction[3];
-          double conf = prediction[4];
+    double maxConfidence =0.3;
+    List<List<double>> detections=[];
+    for(int i=0;i<outputTensor[0].length;i++){
+      List<dynamic> prediction=outputTensor[0][i];
+      double x = prediction[0];
+      double y = prediction[1];
+      double w = prediction[2];
+      double h = prediction[3];
+      double conf = prediction[4];
 
-          if(conf>maxConfidence){
-              detections.add([x,y,w,h,conf,prediction[5]]);
-          }
-          if(detections.length>=5){
-            break;
-          }
+      if(conf>maxConfidence){
+        detections.add([x,y,w,h,conf,prediction[5]]);
       }
-      return detections;
+      if(detections.length>=5){
+        break;
+      }
+    }
+    return detections;
   }
 
   List<List<List<List<double>>>> preProcessImage(Uint8List imageBytes) {
@@ -236,45 +252,45 @@ class _MyHomePageState extends State<MyHomePage> {
 //---------------------------------------------------------------------------------------------------
   bool saving=false;
   bool processing=false;
-Future<void> saveFiles(List<List<List<double>>> batchResults) async {
-  setState(() {
-    saving=true;
-  });
-  try{
-    print("saving...");
-    final Workbook workbook=Workbook();
-    final Worksheet sheet=workbook.worksheets[0];
-
-    sheet.getRangeByName('A1').setText('Image');
-    sheet.getRangeByName('B1').setText('X');
-    sheet.getRangeByName('C1').setText('Y');
-    sheet.getRangeByName('D1').setText('Width');
-    sheet.getRangeByName('E1').setText('Height');
-    sheet.getRangeByName('F1').setText('Confidence');
-    sheet.getRangeByName('G1').setText('Class');
-
-    int rowIndex = 2;
-
-    for(int i=0;i<_batchResults.length;i++){
-      final List<List<double>> detections=batchResults[i];
-      final File imageFile = batch[i];
-      final String imageName = imageFile.uri.pathSegments.last;
-      for(final detection in detections){
-        sheet.getRangeByIndex(rowIndex, 1).setText(imageName);
-        sheet.getRangeByIndex(rowIndex,2).setValue((detection[0]));
-        sheet.getRangeByIndex(rowIndex, 3).setValue(detection[1]);
-        sheet.getRangeByIndex(rowIndex, 4).setValue(detection[2]);
-        sheet.getRangeByIndex(rowIndex, 5).setValue(detection[3]);
-        sheet.getRangeByIndex(rowIndex, 6).setValue(detection[4]*100);
-        sheet.getRangeByIndex(rowIndex, 7).setValue(detection[5]);
-        rowIndex++;
-      }
-    }
-    //----------------saving----------------
-    Directory? dir;
+  Future<void> saveFiles(List<List<List<double>>> batchResults) async {
+    setState(() {
+      saving=true;
+    });
     try{
-      if(Platform.isAndroid){
-        if(await _requestPermission(Permission.storage)){
+      print("saving...");
+      final Workbook workbook=Workbook();
+      final Worksheet sheet=workbook.worksheets[0];
+
+      sheet.getRangeByName('A1').setText('Image');
+      sheet.getRangeByName('B1').setText('X');
+      sheet.getRangeByName('C1').setText('Y');
+      sheet.getRangeByName('D1').setText('Width');
+      sheet.getRangeByName('E1').setText('Height');
+      sheet.getRangeByName('F1').setText('Confidence');
+      sheet.getRangeByName('G1').setText('Class');
+
+      int rowIndex = 2;
+
+      for(int i=0;i<_batchResults.length;i++){
+        final List<List<double>> detections=batchResults[i];
+        final File imageFile = batch[i];
+        final String imageName = imageFile.uri.pathSegments.last;
+        for(final detection in detections){
+          sheet.getRangeByIndex(rowIndex, 1).setText(imageName);
+          sheet.getRangeByIndex(rowIndex,2).setValue((detection[0]));
+          sheet.getRangeByIndex(rowIndex, 3).setValue(detection[1]);
+          sheet.getRangeByIndex(rowIndex, 4).setValue(detection[2]);
+          sheet.getRangeByIndex(rowIndex, 5).setValue(detection[3]);
+          sheet.getRangeByIndex(rowIndex, 6).setValue(detection[4]*100);
+          sheet.getRangeByIndex(rowIndex, 7).setValue(detection[5]);
+          rowIndex++;
+        }
+      }
+      //----------------saving----------------
+      Directory? dir;
+      try{
+        if(Platform.isAndroid){
+          if(await _requestPermission(Permission.storage)){
             dir=await getExternalStorageDirectory();
             final String timestamp = DateTime.now().toString(); // Generate timestamp
             final String fileName = 'batch_detections_$timestamp.xlsx'; // Append timestamp to file name
@@ -283,31 +299,31 @@ Future<void> saveFiles(List<List<List<double>>> batchResults) async {
             final File file=File(filePath);
             await file.writeAsBytes(bytes);
             print('Excel file saved to: $filePath');
+          }
         }
-      }
-    } catch (e){
+      } catch (e){
         print(e);
+      }
+    } catch(e){
+      print('Error saving Excel file $e');
     }
-  } catch(e){
-    print('Error saving Excel file $e');
+    setState(() {
+      saving=false;
+    });
   }
-  setState(() {
-    saving=false;
-  });
-}
 
-Future<bool> _requestPermission(Permission permission) async {
-  if(await permission.isGranted){
-    return true;
-  }else{
-    var res=await permission.request();
-    if(res==PermissionStatus.granted){
+  Future<bool> _requestPermission(Permission permission) async {
+    if(await permission.isGranted){
       return true;
     }else{
-      false;
-    }
-  }return false;
-}
+      var res=await permission.request();
+      if(res==PermissionStatus.granted){
+        return true;
+      }else{
+        false;
+      }
+    }return false;
+  }
 //-------------------------------------------------------------
   // Input shape: [1, 224, 224, 3]
   // Output shape: [1, 10647, 6]
@@ -329,11 +345,15 @@ Future<bool> _requestPermission(Permission permission) async {
   }
 
   Future<void> loadModel() async {
+    _classifier = await tfl.Interpreter.fromAsset("assets/bleeding_classifier.tflite");
     _interpreter = await tfl.Interpreter.fromAsset("assets/wce_model.tflite");
     inputShape = _interpreter.getInputTensor(0).shape;
     outputShape = _interpreter.getOutputTensor(0).shape;
     print('--------------------------Input shape: $inputShape');
     print('--------------------------Output shape: $outputShape');
+
+    print('--------------------Input shape: ${_classifier.getInputTensor(0).shape}');
+    print('--------------------Output shape: ${_classifier.getOutputTensor(0).shape}');
     inputType = _interpreter.getInputTensor(0).type;
     outputType = _interpreter.getOutputTensor(0).type;
     print('--------------------------Input type: $inputType');
@@ -363,31 +383,31 @@ Future<bool> _requestPermission(Permission permission) async {
         child: Column(
           children: [
             (_loadingPredictions)?
-              const SizedBox(
+            const SizedBox(
                 width: 224,
                 height: 224,
                 child: Center(
-                  child: SizedBox(
-                    width: 50,
-                    height: 50,
-                    child: CircularProgressIndicator(),
-                  )
-              ))
-            :(_batchResults.isNotEmpty && _image==null) ?
-                Container(
-                  width: 224,
-                  height: 224,
-                  child: Center(
-                    child: ElevatedButton(
-                      onPressed: () {
-                          saveFiles(_batchResults);
-                      },
-                      child: saving
-                          ? const CircularProgressIndicator()
-                          : const Text('Download Results'),
-                    ),
-                  ),
-                )
+                    child: SizedBox(
+                      width: 50,
+                      height: 50,
+                      child: CircularProgressIndicator(),
+                    )
+                ))
+                :(_batchResults.isNotEmpty && _image==null) ?
+            Container(
+              width: 224,
+              height: 224,
+              child: Center(
+                child: ElevatedButton(
+                  onPressed: () {
+                    saveFiles(_batchResults);
+                  },
+                  child: saving
+                      ? const CircularProgressIndicator()
+                      : const Text('Download Results'),
+                ),
+              ),
+            )
                 : _image != null
                 ? Stack(
               children:[
@@ -408,18 +428,18 @@ Future<bool> _requestPermission(Permission permission) async {
                   ),
               ],
             ): (cameraController != null && cameraController!.value.isInitialized)?
-                SizedBox(
-                    child:CameraPreview(cameraController!),
-                ): SizedBox(
-                    width: 224,
-                    height: 224,
-                    child: Container(),
-                  ),
+            SizedBox(
+              child:CameraPreview(cameraController!),
+            ): SizedBox(
+              width: 224,
+              height: 224,
+              child: Container(),
+            ),
             CustomButton('Pick from Gallery', () => getImage(ImageSource.gallery)),
             CustomButton('Open Camera', () {
               if(_image!=null){
                 setState(() {
-                   _batchResults.clear();
+                  _batchResults.clear();
                   _image=null;
                   _result=null;
                 });
@@ -450,7 +470,7 @@ Future<bool> _requestPermission(Permission permission) async {
             ),
             if(_result != null)
               Text(
-                conf >= 0.3 ? 'Detected' :'No Detections',
+                _isDetected ? 'Detected' :'Not Detected',
                 style: const TextStyle(fontSize: 20),
               ),
           ],
