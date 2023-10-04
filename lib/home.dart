@@ -203,7 +203,7 @@ class _MyHomePageState extends State<MyHomePage> {
 //-------------------------------image processing---------------------------------------------------
   List<List<double>> postProcess(List<dynamic> outputTensor){
     double maxConfidence =0.3;//threshhold
-
+    double iou_threshold=0.9;
     List<List<double>> detections=[];
     for(int i=0;i<outputTensor[0].length;i++){
       List<dynamic> prediction=outputTensor[0][i];
@@ -218,14 +218,17 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     }
 
+    detections.sort((a, b) => b[4].compareTo(a[4]));
+    print("detections passed the threshold :${detections.length}");
     List<List<double>> selections=[];
     for(int i=0;i<detections.length;i++){
       for(int j=i+1;j<detections.length;j++){
-        if(iou(detections[i],detections[j])<0.5){
+        if(iou(detections[i],detections[j])<iou_threshold){
           selections.add(detections[i]);
         }
       }
     }
+    print("detections passed the iou :${selections.length}");
     return selections;
   }
 
@@ -249,7 +252,7 @@ class _MyHomePageState extends State<MyHomePage> {
     double union_area=w1*h1+w2*h2;
 
     return intersection_area/(union_area-intersection_area);
-}
+  }
 
   List<List<List<List<double>>>> preProcessImage(Uint8List imageBytes) {
     imglib.Image img = imglib.decodeImage(imageBytes)!;
