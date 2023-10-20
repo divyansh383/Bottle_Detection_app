@@ -1,4 +1,4 @@
-# camera
+# Detection App
 
 A new Flutter project.
 
